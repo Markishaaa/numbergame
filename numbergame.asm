@@ -1,17 +1,17 @@
 ; 7 positions
 
 data segment
-    time db 0    ;variable used when checking if the time has changed
+    time db 0   ;variable used when checking if the time has changed
     
     posX db ?
     posY db ?
     
-    width dw 320
-    height dw 200
+    width dw 320         ; screen width
+    height dw 200        ; screen height
     
-    fieldWidth db 120 
-    fieldHeight db 165
-    cursorPosX dw 90
+    fieldWidth db 120    ; field width
+    fieldHeight db 165   ; field height
+    cursorPosX dw 90     ; cursor position (used when drawing a field)
     cursorPosY dw 20
     
     address dw ?
@@ -28,9 +28,16 @@ data segment
     pNumPosX db 18 ; starting position of a movable number
     pNumPosY db 21 
     direction db "$"
+
+    number db "  $" ; random generated number (this is a placeholder for it)
+
+    numPosX db 12   ; starting position of a number that will be falling down
+    numPosY db 3 
     
     numMinX db 12    ; closest a player number can get to the left wall
     numMaxX db 24    ; closest a player number can get to the right wall
+    temp db ?
+    numTemp db ?
     
     endMessage db "You lose! final score: $"
 data ends
@@ -311,38 +318,97 @@ clearNumber endp
 
 ; generates a random number from 0 - 9 using system time
 ; stores it in dl
+; bx - range of numbers
 randGen proc
+    push bx ; might not be needed ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
     mov ah, 00h   ; interrupts to get system time        
     int 1ah       ; CX:DX now hold number of clock ticks since midnight      
 
     mov ax, dx
     xor dx, dx
-    mov cx, 10    
+    mov cx, bx    
     div cx       ; here dx contains the remainder of the division - from 0 to 9
 
     add dl, '0'  ; to ascii from '0' to '9'   
+    pop bx
     ret      
 randGen endp
 
+genRandomX proc
+    mov bx, 7
+    call randGen
+    
+    cmp dl, '0'
+    je is0 
+    cmp dl, '1'
+    je is1
+    cmp dl, '2'
+    je is2
+    cmp dl, '3'
+    je is3
+    cmp dl, '4'
+    je is4    
+    cmp dl, '5'
+    je is5    
+    cmp dl, '6'
+    je is6
+    
+    ; if it gets to here somehow call the function again
+    ;call genRandomX
+    jmp end 
+     
+    is0:
+    jmp end
+    is1:
+    mov numPosX, 14
+    jmp end
+    is2:
+    mov numPosX, 16
+    jmp end
+    is3:
+    mov numPosX, 18
+    jmp end
+    is4:
+    mov numPosX, 20
+    jmp end
+    is5:
+    mov numPosX, 22
+    jmp end
+    is6:
+    mov numPosX, 24
+    
+    end:
+    ret
+genRandomX endp
+
 createNum proc
+    mov bx, 10
     call randGen
-    mov [playerNumber], dl
+    mov [number], dl
     
     call randGen
-    mov [playerNumber + 1], dl 
+    mov [number + 1], dl 
+              
+    call genRandomX
     
-    ; printing a number
-    mov dh, pNumPosY
-    mov dl, pNumPosX
-    mov bx, offset playerNumber
+    call printNumber          
     ret    
 createNum endp
+
+printNumber proc
+    ; printing a number
+    mov dh, numPosY
+    mov dl, numPosX
+    mov bx, offset number
+    call print
+    ret
+printNumber endp
 
 printPlayerNumber proc
     ; printing a players movable number
     mov dh, pNumPosY
     mov dl, pNumPosX
-;    mov ah, 02h  ;SetCursorPosition
+;    mov ah, 02h  ; SetCursorPosition
     mov bx, offset playerNumber
     call print
     ret
@@ -375,6 +441,7 @@ input:
 ;    call drawField
     
     ; calling randGen two times because we want a 2 decimal number
+    mov bx, 10
     call randGen
     mov [playerNumber], dl       ; putting first random generated number in a first reserved position
     
@@ -382,7 +449,8 @@ input:
     mov [playerNumber + 1], dl   ; putting second random num in a second reserved position
     
     call printPlayerNumber 
-
+    call createNum
+    
 checkTime:            ;time checking loop
 	mov ah, 2Ch       ;get the system time
 	int 21h    		  ;CH = hour CL = minute DH = second DL = 1/100 seconds
