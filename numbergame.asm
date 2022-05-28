@@ -1,5 +1,3 @@
-; 7 positions
-
 data segment
     time db 0   ;variable used when checking if the time has changed
     
@@ -22,24 +20,31 @@ data segment
     strS db "        "
     S dw 0
     
-    playerNumber db "  $" ; random generated number a player can move
+    playerNumber db "  $" ; random generated number a player can move (as a string)
+    pNum dw 0             ; same but as a number (used when checking if it's even)
+    
     clrNumber db "  $"  ; used for clearing a number 
+    direction db "$"
     
     pNumPosX db 18 ; starting position of a movable number
-    pNumPosY db 21 
-    direction db "$"
+    pNumPosY db 21     
 
     number db "  $" ; random generated number (this is a placeholder for it)
-
+    num dw 0
+    
     numPosX db 12   ; starting position of a number that will be falling down
     numPosY db 3 
     
     numMinX db 12    ; closest a player number can get to the left wall
     numMaxX db 24    ; closest a player number can get to the right wall
-    temp db ?
-    numTemp db ?
     
-    endMessage db "You lose! final score: $"
+    pNumEven dw 0
+    numEven dw 0
+    numEvenStr db '  '
+    pNumEvenStr db '  '
+    
+    endMessage db "Game Over!$"
+    endScore   db "Final score: $"
 data ends
 
 stck segment stack
@@ -51,61 +56,41 @@ stck ends
 ; Macros
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-macro readChar c
-    push ax
-    mov ah, 01
-    int 21h
-    mov c, al
-    pop ax
-endm
-
 ; reading character without it showing on screen
+; after reading key, c needs to be reset
 readKey macro c
     push ax
-    mov ah, 08
-    int 21h
+    mov ah, 1
+    int 16h
+    jnz keyPressed
+
+    jmp readKeyEnd
+    
+    keyPressed:
+    mov ah, 0
+    int 16h
     mov c, al
+         
+    readKeyEnd:
     pop ax
 endm
 
-; Reading a character without saving
-macro keypress 
-    push ax
-    mov ah, 08
-    int 21h
-    pop ax
-endm
-
-; writing one char on screen
-write macro c
-    push ax 
-    push dx
-    mov ah, 02
-    mov dl, c
-    int 21h
-    pop dx 
-    pop ax
-endm
-
-; setting current position to (x, y)
-macro setXY x y
-     push ax
-     push dx
-     mov posX, x
-     mov posY, y
-     
-     mov dx, width
-     shl dx, 1
-     mov ax, dx
-     mov ah, posY
-     mul ah
-     mov dl, posX  
-     shl dl, 1
-     add ax, dx
-   
-     mov address, ax
-     pop dx
-     pop ax
+; checks if number is even
+; a - number getting checked
+; b - variable holding true or false
+macro isEven a, b
+    local even, endIsEven
+    
+    test a, 1       ; checks if number is even
+    je even         ; if it is jumps to label 'even'
+    
+    mov b, 0        ; if not sets to false
+    jmp endIsEven   ; jumps to end
+    
+    even:
+    mov b, 1        ; sets to true
+    
+    endIsEven:    
 endm
 
 ; End of program
@@ -124,58 +109,6 @@ endm
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 code segment 
-    
-; New line
-newLine proc
-    push ax
-    push bx
-    push cx
-    push dx
-    mov ah,03
-    mov bh,0
-    int 10h
-    inc dh
-    mov dl,0
-    mov ah,02
-    int 10h
-    pop dx
-    pop cx
-    pop bx
-    pop ax
-    ret
-newLine endp 
-
-; Reading a string
-; String address is a parameter on stack
-readString proc
-    push ax
-    push bx
-    push cx
-    push dx
-    push si
-    mov bp, sp
-    mov dx, [bp+12]
-    mov bx, dx
-    mov ax, [bp+14]
-    mov byte [bx] ,al
-    mov ah, 0Ah
-    int 21h
-    mov si, dx     
-    mov cl, [si+1] 
-    mov ch, 0
-copy:
-    mov al, [si+2]
-    mov [si], al
-    inc si
-    loop copy     
-    mov [si], '$'
-    pop si  
-    pop dx
-    pop cx
-    pop bx
-    pop ax
-    ret 4
-readString endp
 
 ; string to int conversion
 strToInt proc
@@ -307,9 +240,11 @@ drawField proc
 drawField endp
 
 ; clears previous position of the number moved by player
+; ch - number Y pos
+; cl - number X pos
 clearNumber proc
-    mov dh, pNumPosY
-    mov dl, pNumPosX
+    mov dh, ch
+    mov dl, cl
     mov bx, offset clrNumber ; replaces current number with an empty string
     call print
     ret
@@ -320,7 +255,6 @@ clearNumber endp
 ; stores it in dl
 ; bx - range of numbers
 randGen proc
-    push bx ; might not be needed ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
     mov ah, 00h   ; interrupts to get system time        
     int 1ah       ; CX:DX now hold number of clock ticks since midnight      
 
@@ -330,13 +264,13 @@ randGen proc
     div cx       ; here dx contains the remainder of the division - from 0 to 9
 
     add dl, '0'  ; to ascii from '0' to '9'   
-    pop bx
     ret      
 randGen endp
 
+; generates a random X position of a number
 genRandomX proc
-    mov bx, 7
-    call randGen
+    mov bx, 7    ; there can be 7 positions
+    call randGen ; calls a random num gen for numbers 0 - 6
     
     cmp dl, '0'
     je is0 
@@ -357,9 +291,10 @@ genRandomX proc
     ;call genRandomX
     jmp end 
      
-    is0:
-    jmp end
-    is1:
+    is0:             ; if it's 0 stay on starting position (12 - far left of field)
+    mov numPosX, 12
+    jmp end           
+    is1:             ; if it's 1 move 2 pixels to the right
     mov numPosX, 14
     jmp end
     is2:
@@ -381,20 +316,22 @@ genRandomX proc
     ret
 genRandomX endp
 
+; creates and prints a number that will be falling from the top on a random x pos
 createNum proc
     mov bx, 10
-    call randGen
+    call randGen         ; generates a random number 0 - 9
     mov [number], dl
     
     call randGen
-    mov [number + 1], dl 
+    mov [number + 1], dl ; and then once again, "number" now has 2 digits
               
-    call genRandomX
+    call genRandomX      ; gets a random x pos
     
-    call printNumber          
+    call printNumber     ; prints a number on screen     
     ret    
 createNum endp
 
+; printing a number
 printNumber proc
     ; printing a number
     mov dh, numPosY
@@ -440,6 +377,7 @@ input:
     ; drawing the field
 ;    call drawField
     
+newNumbers:    
     ; calling randGen two times because we want a 2 decimal number
     mov bx, 10
     call randGen
@@ -448,8 +386,22 @@ input:
     call randGen
     mov [playerNumber + 1], dl   ; putting second random num in a second reserved position
     
-    call printPlayerNumber 
+    push offset playerNumber
+    push offset pNum
+    call strToInt
+    
+    isEven pNum, pNumEven 
+    
+    call printPlayerNumber
+    
+    mov [numPosY], 3  ; resetting numPosY so it doesn't start from the bottom after the first loop
     call createNum
+    
+    push offset number
+    push offset num
+    call strToInt
+    
+    isEven num, numEven
     
 checkTime:            ;time checking loop
 	mov ah, 2Ch       ;get the system time
@@ -458,7 +410,19 @@ checkTime:            ;time checking loop
 	cmp dl, time  	  ; is the current time equal to the previous one?
 	je checkTime      ;if it is the same, check again 
 	
-	mov time, dl      ; if it's not the same, time becomes current time  
+	mov time, dl      ; if it's not the same, time becomes current time
+	
+moveNumber:
+    mov ch, numPosY
+    mov cl, numPosX
+    call clearNumber
+    
+    mov al, pNumPosY
+    cmp numPosY, al
+    je collect
+    
+    add numPosY, 2
+    call printNumber	  
 
 loopMoving:
     readKey direction
@@ -467,37 +431,84 @@ loopMoving:
     je left
     cmp direction, 'd'
     je right
-    jmp endPoint     
+    jmp checkTime     
       
-    left:             ; if we're trying to go left
-    mov al, numMinX   ; putting variable in a register because you can't compare two variables
-    cmp al, pNumPosX  ; compare current x pos of number with min x pos
-    je continueLoop   ; if numposX != minPosX don't move left
-    jmp continueLeft  ; if numposX != minPosX jump to continueLeft label
+    left:               ; if we're trying to go left
+    mov direction, 0    ; resetting direction
+    mov al, numMinX     ; putting variable in a register because you can't compare two variables
+    cmp al, pNumPosX    ; compare current x pos of number with min x pos
+    je continueLoop     ; if numposX != minPosX don't move left
+    jmp continueLeft    ; if numposX != minPosX jump to continueLeft label
     
-    continueLeft:     ; move left
-    call clearNumber  ; clear the last pos of number 
-    sub pNumPosX, 2   ; sub x with 2 (go left 2 pixels)
+    continueLeft:       ; move left
+    mov ch, pNumPosY
+    mov cl, pNumPosX
+    call clearNumber    ; clear the last pos of number 
+    sub pNumPosX, 2     ; sub x with 2 (go left 2 pixels)
     jmp continue      
    
-    right:            ; if we're trying to go right  
+    right:              ; if we're trying to go right  
+    mov direction, 0
     mov al, numMaxX
     cmp al, pNumPosX
     je continueLoop
     jmp continueRight
     
-    continueRight:    ; move right
+    continueRight:      ; move right
+    mov ch, pNumPosY
+    mov cl, pNumPosX
     call clearNumber
     add pNumPosX, 2
     jmp continue
     
-    continue:         ; this prints the number in a new position
+    continue:           ; this prints the number in a new position
     call printPlayerNumber 
     
-    continueLoop:     ; after everything is finished, continues to check time
+    continueLoop:       ; after everything is finished, continues to check time
     jmp checkTime
     
+collect:
+    ; check if they're the right parity
+    mov ax, pNumEven
+    cmp numEven, ax
+    je collectTrue
+    
+    collectFalse:
+    mov al, pNumPosX
+    cmp numPosX, al
+    je endPoint
+    
+    jmp continueCollect
+
+    
+    collectTrue:
+    mov al, pNumPosX
+    cmp numPosX, al
+    je continueCollect
+    
+    jmp endPoint 
+    
+    continueCollect:
+    mov ch, pNumPosY
+    mov cl, pNumPosX
+    call clearNumber
+    
+    mov ch, numPosY
+    mov cl, numPosX
+    call clearNumber
+    
+    jmp newNumbers
+    
 endPoint:
+    mov dh, 6
+    mov dl, 14
+    mov bx, offset endMessage
+    call print
+    mov dh, 7
+    mov dl, 13
+    mov bx, offset endScore
+    call print
     programEnd
+                                  
 ends
 end start
