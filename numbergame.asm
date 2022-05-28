@@ -14,11 +14,10 @@ data segment
     
     address dw ?
     
-    scoreMessage db "Score: $"
-    
-    score db "$"
-    strS db "        "
-    S dw 0
+    scoreMessage db "Score: $"  ; score message
+    scoreStr db "0         $"   ; holds score string
+    score dw 0                  ; holds score int
+    clrScore db "  $"           ; used for clearing score 
     
     playerNumber db "  $" ; random generated number a player can move (as a string)
     pNum dw 0             ; same but as a number (used when checking if it's even)
@@ -59,6 +58,8 @@ stck ends
 ; reading character without it showing on screen
 ; after reading key, c needs to be reset
 readKey macro c
+    local keyPressed, readKeyEnd
+    
     push ax
     mov ah, 1
     int 16h
@@ -143,7 +144,7 @@ end1:
 strToInt endp
 
 ; int to string conversion
-intToString proc
+intToStr proc
     push ax 
     push bx 
     push cx 
@@ -174,16 +175,18 @@ loop2a:
     pop bx 
     pop ax
     ret 4
-intToString endp
+intToStr endp
 
 ; prints a string
 ; dh - row
 ; dl - col
 ; bx - string address
+; bh - color
 print proc
     ; set cursor position
     push bx
     mov ah, 2
+    mov al, bh
     xor bh, bh
     int 10h
 
@@ -250,11 +253,21 @@ clearNumber proc
     ret
 clearNumber endp
 
+; clears the previous position of score
+clearScore proc
+    mov dh, 1
+    mov dl, 8
+    mov bx, offset clrScore
+    call print
+    ret 
+clearScore endp
+
 
 ; generates a random number from 0 - 9 using system time
 ; stores it in dl
 ; bx - range of numbers
-randGen proc
+randGen proc 
+    loopRandGen:
     mov ah, 00h   ; interrupts to get system time        
     int 1ah       ; CX:DX now hold number of clock ticks since midnight      
 
@@ -263,7 +276,8 @@ randGen proc
     mov cx, bx    
     div cx       ; here dx contains the remainder of the division - from 0 to 9
 
-    add dl, '0'  ; to ascii from '0' to '9'   
+    add dl, '0'  ; to ascii from '0' to '9'
+      
     ret      
 randGen endp
 
@@ -287,8 +301,7 @@ genRandomX proc
     cmp dl, '6'
     je is6
     
-    ; if it gets to here somehow call the function again
-    ;call genRandomX
+    ; if it somehow gets to here end the procedure 
     jmp end 
      
     is0:             ; if it's 0 stay on starting position (12 - far left of field)
@@ -333,7 +346,6 @@ createNum endp
 
 ; printing a number
 printNumber proc
-    ; printing a number
     mov dh, numPosY
     mov dl, numPosX
     mov bx, offset number
@@ -341,15 +353,23 @@ printNumber proc
     ret
 printNumber endp
 
+; printing a players movable number
 printPlayerNumber proc
-    ; printing a players movable number
     mov dh, pNumPosY
     mov dl, pNumPosX
-;    mov ah, 02h  ; SetCursorPosition
     mov bx, offset playerNumber
     call print
     ret
 printPlayerNumber endp
+
+; printing score
+printScore proc
+    mov dh, 1
+    mov dl, 8
+    mov bx, offset scoreStr
+    call print
+    ret
+printScore endp
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -357,7 +377,7 @@ printPlayerNumber endp
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 start: 
-    ; Setting segment registers
+    ; Setting the segment registers
     ASSUME cs: code, ss:stck
     mov ax, data
     mov ds, ax 
@@ -368,14 +388,23 @@ input:
     mov al, 13h
     int 10h
     
+    keyWait:            ; game won't start until a player presses 's'
+	readKey direction   ; this is intended only for readjusting the emu window
+	cmp direction, 's'  
+	je continueProgram
+	
+	jmp keyWait
+	
+    continueProgram:   
     ; printing a score message
     mov dh, 1
     mov dl, 1
     mov bx, offset scoreMessage
     call print
+    call printScore  
     
     ; drawing the field
-;    call drawField
+    call drawField
     
 newNumbers:    
     ; calling randGen two times because we want a 2 decimal number
@@ -415,11 +444,11 @@ checkTime:            ;time checking loop
 moveNumber:
     mov ch, numPosY
     mov cl, numPosX
-    call clearNumber
+    call clearNumber    ; clears number from the screen
     
     mov al, pNumPosY
-    cmp numPosY, al
-    je collect
+    cmp numPosY, al     ; compares y pos of both numbers
+    je collect          ; if they're the same go to collect label
     
     add numPosY, 2
     call printNumber	  
@@ -427,7 +456,7 @@ moveNumber:
 loopMoving:
     readKey direction
     
-    cmp direction, 'a'
+    cmp direction, 'a'  ; reads the key that's been pressed
     je left
     cmp direction, 'd'
     je right
@@ -471,44 +500,56 @@ collect:
     ; check if they're the right parity
     mov ax, pNumEven
     cmp numEven, ax
-    je collectTrue
+    je collectTrue   ; if they are, jump to collectTrue
     
-    collectFalse:
-    mov al, pNumPosX
-    cmp numPosX, al
+    collectFalse:    ; if they're not...
+    mov al, pNumPosX ; compare their x positions
+    cmp numPosX, al  ; if they're the same end the game
     je endPoint
     
-    jmp continueCollect
+    jmp continueCollect ; if they're not continue
 
-    
     collectTrue:
-    mov al, pNumPosX
-    cmp numPosX, al
-    je continueCollect
+    mov al, pNumPosX     
+    cmp numPosX, al     ; compare their x positions
+    je continueCollect  ; if they're the same continue
     
-    jmp endPoint 
+    jmp endPoint        ; if not, end
     
     continueCollect:
+    add score, 10
+    call clearScore
+   
+    push score
+    push offset scoreStr
+    call intToStr
+    
+    call printScore
+    
     mov ch, pNumPosY
     mov cl, pNumPosX
-    call clearNumber
+    call clearNumber    ; clears both numbers from the screen
     
     mov ch, numPosY
     mov cl, numPosX
     call clearNumber
     
-    jmp newNumbers
+    jmp newNumbers      ; jump to newNumbers (continue loop / create new numbers)
     
 endPoint:
     mov dh, 6
     mov dl, 14
-    mov bx, offset endMessage
+    mov bx, offset endMessage     ; print end message
     call print
-    mov dh, 7
+    mov dh, 9
     mov dl, 13
-    mov bx, offset endScore
+    mov bx, offset endScore       ; print final score
     call print
-    programEnd
+    mov dh, 11
+    mov dl, 13
+    mov bx, offset scoreStr       ; final score
+    call print
+    programEnd                    ; end the game
                                   
 ends
 end start
