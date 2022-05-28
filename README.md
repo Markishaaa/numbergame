@@ -9,11 +9,10 @@ A game of numbers written in the Assembly language.
 - you get 10 points after every succsessful catch/avoid
 - if you mess up, you lose
 
-Video of gamplay:
+### Video of gameplay:
 [![gameplay video](https://img.youtube.com/vi/Fn5BZ0nEbfM/0.jpg)](https://youtu.be/Fn5BZ0nEbfM)
 
-https://youtu.be/Fn5BZ0nEbfM
-
+### Info:
 The game is supposed to be ran in emu8086.
 Once you run the game, you start by pressing 's' on your keyboard
 Before pressing 's' you can readjust the emulator' window.
